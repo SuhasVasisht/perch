@@ -10,11 +10,11 @@
 </p>
 
 <p align="center">
-  <a href="docs/perch-x.mp4"><img src="docs/perch-x.gif" width="720" alt="Perch's X widget: pressing Down moves one post at a time while the window resizes to fit each post"></a>
+  <a href="docs/perch-x.mp4"><img src="docs/perch-x.webp" width="100%" alt="Perch's X widget: pressing Down moves one post at a time while the window resizes to fit each post"></a>
 </p>
 
 <p align="center">
-  <a href="docs/perch-music.mp4"><img src="docs/perch-music.gif" width="720" alt="Perch's YouTube Music widget: skipping songs in the mini player, expanding to the full app and collapsing back"></a>
+  <a href="docs/perch-music.mp4"><img src="docs/perch-music.webp" width="100%" alt="Perch's YouTube Music widget: skipping songs in the mini player, expanding to the full app and collapsing back"></a>
 </p>
 
 ## What it does
