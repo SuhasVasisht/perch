@@ -77,6 +77,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 @main
 enum PerchMain {
     static func main() {
+        if CommandLine.arguments.dropFirst().elementsEqual(["--version"]) {
+            let info = Bundle.main.infoDictionary ?? [:]
+            print("Perch \(info["CFBundleShortVersionString"] as? String ?? "unknown") (\(info["CFBundleVersion"] as? String ?? "unknown"))")
+            return
+        }
         let app = NSApplication.shared
         app.setActivationPolicy(.regular)
         app.delegate = appDelegate

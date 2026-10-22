@@ -46,6 +46,28 @@ Perch keeps the part of a site you actually use in a small floating window. It u
 
 Requires macOS 26 on Apple silicon.
 
+### Install with Homebrew
+
+The source-building tap requires [Homebrew](https://brew.sh/) and Xcode 26 command line tools or later. Install the tools with `xcode-select --install` if needed.
+
+After the first [Homebrew release is published](#publish-a-homebrew-release), install and launch with:
+
+```sh
+brew install suhasvasisht/tap/perch
+perch
+```
+
+Homebrew compiles Perch on your Mac and applies a free ad-hoc signature. This method needs no DMG, paid Apple Developer account, or notarization. It installs the app inside Homebrew's Cellar and adds the `perch` command. If you have a DMG-installed copy running, quit it before opening the Homebrew copy. Both copies use your existing settings and sign-ins.
+
+```sh
+perch --version
+brew test suhasvasisht/tap/perch
+brew upgrade suhasvasisht/tap/perch
+brew uninstall suhasvasisht/tap/perch
+```
+
+Uninstalling the formula keeps your settings and sign-ins. The app bundle is at `$(brew --prefix perch)/Perch.app`.
+
 ## Build from source
 
 You need the Xcode command line tools (`xcode-select --install`).
@@ -63,6 +85,53 @@ xcrun notarytool store-credentials perch-notary \
 
 SIGN_ID="Developer ID Application: Your Name (TEAMID)" \
 NOTARY_PROFILE=perch-notary ./package.sh
+```
+
+## Package for Homebrew
+
+Generate a source archive, its SHA-256 checksum, and a Homebrew formula from the current checkout:
+
+```sh
+./package.sh --homebrew
+```
+
+The files appear in `dist/homebrew/`. The archive includes only build inputs and the license. It excludes prebuilt apps, recordings, and local verification data. The formula comes from `packaging/homebrew/perch.rb.in`, with the version and build read from `Info.plist`.
+
+Run an actual Homebrew source install before publishing:
+
+```sh
+python3 scripts/verify-homebrew.py
+```
+
+The check creates a temporary local tap, installs the packaged source through Homebrew, runs `brew test`, executes the installed app with `--version`, and verifies its ad-hoc signature. It removes its test install and tap afterward. It leaves `/Applications/Perch.app` in place and does not open any app windows. The report is saved to `verification/perch-homebrew-report.json`. If Perch is already installed through Homebrew, use `brew test perch` instead.
+
+### Publish a Homebrew release
+
+Publishing requires Python 3, Git, and the [GitHub CLI](https://cli.github.com/). Sign in with `gh auth login`.
+
+For the first release, create the public source repository if it does not exist:
+
+```sh
+gh repo create SuhasVasisht/perch --public --description "Small, cropped web apps that float on your Mac desktop"
+```
+
+Set the release version and build in `Info.plist`, commit the release changes, and push the release commit to the configured `origin`:
+
+```sh
+git push -u origin main
+./package.sh --publish-homebrew
+```
+
+The publish command requires a clean checkout and checks that the exact commit exists on GitHub. It packages source from that commit, creates a `v<version>` GitHub release with the source archive and checksum, and creates or updates `SuhasVasisht/homebrew-tap` with `Formula/perch.rb`. This is your own Homebrew tap, so no submission to `homebrew/core` is needed. Existing tap files are preserved.
+
+Re-running the command accepts identical release assets. It refuses to replace published source or reuse a version tag for a different commit. For the next release, increase both version fields in `Info.plist`, commit, push, verify, and publish again. Other repositories can be selected with `--repo owner/perch --tap-repo owner/homebrew-tap`.
+
+After publishing, check the public installation:
+
+```sh
+brew install suhasvasisht/tap/perch
+brew test suhasvasisht/tap/perch
+perch --version
 ```
 
 ## Adding a widget

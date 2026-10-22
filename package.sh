@@ -2,6 +2,11 @@
 # Builds a release Perch.app and wraps it in a drag-to-Applications DMG at
 # dist/Perch-<version>.dmg.
 #
+#   ./package.sh --homebrew
+#       Package source and generate dist/homebrew/perch.rb. No app build or DMG.
+#   ./package.sh --publish-homebrew
+#       Publish the committed source release and update your Homebrew tap using gh.
+#
 #   ./package.sh
 #       Ad-hoc signed. Runs on your own Macs. Anyone you send it to gets a
 #       Gatekeeper warning and has to allow it once in System Settings >
@@ -16,6 +21,17 @@
 #           --apple-id you@example.com --team-id TEAMID --password <app-specific-password>
 set -euo pipefail
 cd "$(dirname "$0")"
+
+case "${1:-}" in
+  --homebrew|--publish-homebrew)
+    MODE=package
+    if [[ "$1" == "--publish-homebrew" ]]; then MODE=publish; fi
+    shift
+    exec python3 scripts/homebrew_release.py "$MODE" "$@"
+    ;;
+  "") ;;
+  *) echo "Usage: $0 [--homebrew|--publish-homebrew [options]]" >&2; exit 2 ;;
+esac
 
 VERSION=$(/usr/libexec/PlistBuddy -c "Print CFBundleShortVersionString" Info.plist)
 ./build.sh

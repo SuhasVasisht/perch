@@ -1,0 +1,45 @@
+class Perch < Formula
+  desc "Small, cropped web apps that float on your Mac desktop"
+  homepage "https://github.com/@REPO@"
+  url "@SOURCE_URL@"
+  sha256 "@SHA256@"
+  license "MIT"
+
+  depends_on arch: :arm64
+  depends_on macos: :tahoe
+
+  # Keep Homebrew's stripping step from invalidating the signed app bundle.
+  skip_clean "Perch.app"
+
+  def install
+    system "./build.sh"
+    prefix.install "Perch.app"
+    (bin/"perch").write <<~EOS
+      #!/bin/bash
+      set -euo pipefail
+      case "$#:${1:-}" in
+        0:) exec /usr/bin/open "#{opt_prefix}/Perch.app" ;;
+        1:--version) exec "#{opt_prefix}/Perch.app/Contents/MacOS/Perch" --version ;;
+        *) echo "Usage: perch [--version]" >&2; exit 2 ;;
+      esac
+    EOS
+  end
+
+  def caveats
+    <<~EOS
+      Run perch to open the app, or perch --version to check the installed build.
+      Perch.app is at:
+        #{opt_prefix}/Perch.app
+
+      This formula builds from source on your Mac with a free ad-hoc signature.
+      It does not download a prebuilt app or require an Apple Developer account.
+      An existing /Applications/Perch.app is left in place. Quit that copy before
+      opening this one. Both copies use the same saved settings and sign-ins.
+    EOS
+  end
+
+  test do
+    system "/usr/bin/codesign", "--verify", "--strict", prefix/"Perch.app"
+    assert_equal "Perch #{version} (@BUILD@)\n", shell_output("#{bin}/perch --version")
+  end
+end
