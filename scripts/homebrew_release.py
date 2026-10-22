@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Package buildable Perch sources and publish a source-only Homebrew tap."""
 import argparse
+import base64
 import gzip
 import hashlib
 import io
@@ -42,6 +43,20 @@ def repository(value):
     return value
 
 
+def write_formula(root, destination, repo, version, build, digest):
+    formula = (root / 'packaging/homebrew/perch.rb.in').read_text()
+    values = {
+        'REPO': repo, 'VERSION': version, 'BUILD': build, 'SHA256': digest,
+        'SOURCE_URL': f'https://github.com/{repo}/releases/download/v{version}/Perch-{version}-source.tar.gz',
+    }
+    for key, value in values.items():
+        formula = formula.replace(f'@{key}@', value)
+    destination.mkdir(parents=True, exist_ok=True)
+    formula_path = destination / 'perch.rb'
+    formula_path.write_text(formula)
+    return formula_path
+
+
 def package(root, destination, repo):
     info = plistlib.loads((root / 'Info.plist').read_bytes())
     version, build = info['CFBundleShortVersionString'], info['CFBundleVersion']
@@ -72,17 +87,65 @@ def package(root, destination, repo):
     digest = hashlib.sha256(archive.read_bytes()).hexdigest()
     checksum = destination / (archive.name + '.sha256')
     checksum.write_text(f'{digest}  {archive.name}\n')
-    formula = (root / 'packaging/homebrew/perch.rb.in').read_text()
-    values = {
-        'REPO': repo, 'VERSION': version, 'BUILD': build, 'SHA256': digest,
-        'SOURCE_URL': f'https://github.com/{repo}/releases/download/v{version}/{archive.name}',
-    }
-    for key, value in values.items():
-        formula = formula.replace(f'@{key}@', value)
-    formula_path = destination / 'perch.rb'
-    formula_path.write_text(formula)
+    formula_path = write_formula(root, destination, repo, version, build, digest)
     print(f'Source: {archive}\nSHA256: {digest}\nFormula: {formula_path}', flush=True)
     return version, archive, checksum, formula_path
+
+
+def update_tap(root, formula, tap_repo, message):
+    """Commit Formula/perch.rb to the tap when it changed. Returns whether it did."""
+    with tempfile.TemporaryDirectory(prefix='perch-tap-publish-') as directory:
+        checkout = Path(directory) / 'tap'
+        run('gh', 'repo', 'clone', tap_repo, str(checkout))
+        (checkout / 'Formula').mkdir(exist_ok=True)
+        shutil.copy2(formula, checkout / 'Formula/perch.rb')
+        # Add only our formula, preserving any other packages in an existing tap.
+        run('git', 'add', 'Formula/perch.rb', cwd=checkout)
+        diff = subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=checkout)
+        if diff.returncode == 0:
+            return False
+        if diff.returncode != 1:
+            diff.check_returncode()
+        # Commit as this checkout's author, not the machine-wide git identity.
+        name = output('git', 'config', 'user.name', cwd=root)
+        email = output('git', 'config', 'user.email', cwd=root)
+        run('git', '-c', f'user.name={name}', '-c', f'user.email={email}',
+            'commit', '-m', message, cwd=checkout)
+        run('git', 'push', 'origin', 'HEAD', cwd=checkout)
+        return True
+
+
+def sync(root, destination, repo, tap_repo):
+    """Release a new version from Info.plist, or refresh the tap formula for the released one."""
+    if output('git', 'status', '--porcelain', '--untracked-files=normal', cwd=root):
+        raise RuntimeError('Commit your changes before syncing. The checkout must be clean.')
+    info = plistlib.loads((root / 'Info.plist').read_bytes())
+    version, build = info['CFBundleShortVersionString'], info['CFBundleVersion']
+    tag = f'v{version}'
+    release = github(f'repos/{repo}/releases/tags/{tag}', missing_ok=True)
+    if release is None:
+        return publish(root, destination, repo, tap_repo)
+    if release['draft']:
+        raise RuntimeError(f'{tag} is a draft release. Publish it before updating the tap.')
+    tap = github(f'repos/{tap_repo}', missing_ok=True)
+    if tap is None or tap['private']:
+        raise RuntimeError(f'{tap_repo} must exist and be public')
+    # The formula keeps pointing at the released source, so its build must match.
+    released = plistlib.loads(base64.b64decode(github(f'repos/{repo}/contents/Info.plist?ref={tag}')['content']))
+    if released['CFBundleVersion'] != build:
+        raise RuntimeError(f'{tag} was released as build {released["CFBundleVersion"]}. '
+                           f'Raise CFBundleShortVersionString to release build {build}.')
+    checksum = f'Perch-{version}-source.tar.gz.sha256'
+    if checksum not in {asset['name'] for asset in release['assets']}:
+        raise RuntimeError(f'{tag} has no {checksum}')
+    with tempfile.TemporaryDirectory(prefix='perch-release-check-') as directory:
+        run('gh', 'release', 'download', tag, '--repo', repo, '--pattern', checksum, '--dir', directory)
+        digest = (Path(directory) / checksum).read_text().split()[0]
+    if not re.fullmatch(r'[0-9a-f]{64}', digest):
+        raise RuntimeError(f'{checksum} does not contain a SHA-256 digest')
+    formula = write_formula(root, destination, repo, version, build, digest)
+    changed = update_tap(root, formula, tap_repo, f'perch {version}: update formula')
+    print(f'{tap_repo} formula {"updated" if changed else "already current"} for {tag}', flush=True)
 
 
 def publish(root, destination, repo, tap_repo):
@@ -138,23 +201,7 @@ def publish(root, destination, repo, tap_repo):
                 '--target', commit, '--title', f'Perch {version}', '--notes-file', str(notes))
     if tap is None:
         run('gh', 'repo', 'create', tap_repo, '--public', '--description', 'Homebrew source builds for Perch')
-    with tempfile.TemporaryDirectory(prefix='perch-tap-publish-') as directory:
-        checkout = Path(directory) / 'tap'
-        run('gh', 'repo', 'clone', tap_repo, str(checkout))
-        (checkout / 'Formula').mkdir(exist_ok=True)
-        shutil.copy2(formula, checkout / 'Formula/perch.rb')
-        # Add only our formula, preserving any other packages in an existing tap.
-        run('git', 'add', 'Formula/perch.rb', cwd=checkout)
-        diff = subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=checkout)
-        if diff.returncode == 1:
-            # Commit as this checkout's author, not the machine-wide git identity.
-            name = output('git', 'config', 'user.name', cwd=root)
-            email = output('git', 'config', 'user.email', cwd=root)
-            run('git', '-c', f'user.name={name}', '-c', f'user.email={email}',
-                'commit', '-m', f'perch {version}', cwd=checkout)
-            run('git', 'push', 'origin', 'HEAD', cwd=checkout)
-        else:
-            diff.check_returncode()
+    update_tap(root, formula, tap_repo, f'perch {version}')
     tap_name = tap_repo.replace('/homebrew-', '/')
     print(f'Published https://github.com/{repo}/releases/tag/{tag}\n'
           f'Tap: https://github.com/{tap_repo}\nInstall: brew install {tap_name}/perch', flush=True)
@@ -162,7 +209,7 @@ def publish(root, destination, repo, tap_repo):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=('package', 'publish'))
+    parser.add_argument('command', choices=('package', 'publish', 'sync'))
     parser.add_argument('--repo', type=repository, default=DEFAULT_REPO, help='source GitHub repository')
     parser.add_argument('--tap-repo', type=repository, help='defaults to <source owner>/homebrew-tap')
     parser.add_argument('--output', type=Path, default=ROOT / 'dist/homebrew')
@@ -173,8 +220,10 @@ def main():
     try:
         if args.command == 'package':
             package(ROOT, args.output.resolve(), args.repo)
-        else:
+        elif args.command == 'publish':
             publish(ROOT, args.output.resolve(), args.repo, tap_repo)
+        else:
+            sync(ROOT, args.output.resolve(), args.repo, tap_repo)
     except (ValueError, RuntimeError, OSError, subprocess.CalledProcessError) as error:
         parser.exit(1, f'Homebrew release failed: {error}\n')
 

@@ -1,0 +1,47 @@
+# Keeps SuhasVasisht/homebrew-tap in step with this repository.
+#
+# Every push to main runs `scripts/homebrew_release.py sync`:
+#   - a version in Info.plist with no GitHub release yet is released, and the
+#     tap formula is pointed at its source archive;
+#   - an already released version only refreshes the tap formula from
+#     packaging/homebrew/perch.rb.in, so template changes reach the tap.
+# `brew install --HEAD` always builds the latest main.
+name: Homebrew
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: homebrew-release
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use the tap deploy key
+        env:
+          TAP_DEPLOY_KEY: ${{ secrets.TAP_DEPLOY_KEY }}
+        run: |
+          install -d -m 700 ~/.ssh
+          printf '%s\n' "$TAP_DEPLOY_KEY" > ~/.ssh/homebrew_tap
+          chmod 600 ~/.ssh/homebrew_tap
+          # GitHub's published host key: https://docs.github.com/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints
+          echo 'github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl' >> ~/.ssh/known_hosts
+          # The tap is cloned over HTTPS by gh; rewrite it to SSH so pushes use the deploy key.
+          git config --global url."git@github.com:SuhasVasisht/homebrew-tap".insteadOf "https://github.com/SuhasVasisht/homebrew-tap"
+          git config --global core.sshCommand "ssh -i ~/.ssh/homebrew_tap -o IdentitiesOnly=yes"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Release or refresh the tap formula
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python3 scripts/homebrew_release.py sync

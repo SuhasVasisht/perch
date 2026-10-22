@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Check source artifacts and release immutability without publishing to GitHub."""
+import base64
 import hashlib
 from pathlib import Path
 import plistlib
@@ -168,6 +169,78 @@ class HomebrewRelease(unittest.TestCase):
         self.assertIn('class Perch < Formula', formula)
         self.assertIn(f'sha256 "{hashlib.sha256(published["Perch-1.9-source.tar.gz"]).hexdigest()}"', formula)
 
+
+    def sync_fixture(self, released_build='12'):
+        """A tap remote plus GitHub fakes where v1.9 is already released."""
+        remote = Path(self.temp.name) / 'sync-remote.git'
+        seed = Path(self.temp.name) / 'sync-seed'
+        (seed / 'Formula').mkdir(parents=True)
+        (seed / 'Formula/perch.rb').write_text('old formula\n')
+        subprocess.run(['git', 'init', '-q', str(seed)], check=True)
+        subprocess.run(['git', '-C', str(seed), 'add', '.'], check=True)
+        subprocess.run(['git', '-C', str(seed), '-c', 'user.name=Perch test', '-c', 'user.email=test@localhost',
+                        'commit', '-qm', 'Tap'], check=True)
+        subprocess.run(['git', 'clone', '-q', '--bare', str(seed), str(remote)], check=True)
+        subprocess.run(['git', '-C', str(self.root), 'config', 'user.name', 'Perch author'], check=True)
+        subprocess.run(['git', '-C', str(self.root), 'config', 'user.email', 'author@example.invalid'], check=True)
+        digest = 'ab' * 32
+        mutations = []
+        released = base64.b64encode(plistlib.dumps({'CFBundleShortVersionString': '1.9', 'CFBundleVersion': released_build})).decode()
+
+        def github(path, missing_ok=False):
+            if path == 'repos/owner/perch/releases/tags/v1.9':
+                return {'draft': False, 'assets': [{'name': 'Perch-1.9-source.tar.gz'}, {'name': 'Perch-1.9-source.tar.gz.sha256'}]}
+            if path == 'repos/owner/homebrew-tap':
+                return {'private': False}
+            if path == 'repos/owner/perch/contents/Info.plist?ref=v1.9':
+                return {'content': released}
+            self.fail(f'Unexpected GitHub request: {path}')
+
+        def execute(*args, **kwargs):
+            if args[:3] == ('gh', 'release', 'download'):
+                (Path(args[args.index('--dir') + 1]) / 'Perch-1.9-source.tar.gz.sha256').write_text(f'{digest}  Perch-1.9-source.tar.gz\n')
+                return
+            if args[:3] == ('gh', 'repo', 'clone'):
+                subprocess.run(['git', 'clone', '-q', str(remote), args[4]], check=True)
+                return
+            self.assertEqual(args[0], 'git', f'Unexpected command: {args}')
+            if 'commit' in args:
+                mutations.append('formula committed')
+            subprocess.run(args, check=True, **kwargs)
+
+        return remote, digest, mutations, github, execute
+
+    def test_sync_refreshes_the_formula_of_a_released_version_without_a_new_release(self):
+        remote, digest, mutations, github, execute = self.sync_fixture()
+        with patch.object(release, 'github', side_effect=github), patch.object(release, 'run', side_effect=execute):
+            release.sync(self.root, self.destination, 'owner/perch', 'owner/homebrew-tap')
+            release.sync(self.root, self.destination, 'owner/perch', 'owner/homebrew-tap')
+        self.assertEqual(mutations, ['formula committed'])  # The second sync is a no-op.
+        formula = subprocess.check_output(['git', '--git-dir', str(remote), 'show', 'HEAD:Formula/perch.rb'], text=True)
+        self.assertIn(f'sha256 "{digest}"', formula)
+        self.assertIn('url "https://github.com/owner/perch/releases/download/v1.9/Perch-1.9-source.tar.gz"', formula)
+        self.assertIn('head "https://github.com/owner/perch.git", branch: "main"', formula)
+        author = subprocess.check_output(['git', '--git-dir', str(remote), 'log', '-1', '--format=%ae'], text=True).strip()
+        self.assertEqual(author, 'author@example.invalid')
+
+    def test_sync_refuses_a_new_build_number_under_a_released_version(self):
+        remote, digest, mutations, github, execute = self.sync_fixture(released_build='11')
+        with patch.object(release, 'github', side_effect=github), patch.object(release, 'run', side_effect=execute):
+            with self.assertRaisesRegex(RuntimeError, 'released as build 11'):
+                release.sync(self.root, self.destination, 'owner/perch', 'owner/homebrew-tap')
+        self.assertEqual(mutations, [])
+
+    def test_sync_publishes_when_the_version_has_no_release(self):
+        with patch.object(release, 'github', return_value=None), patch.object(release, 'publish') as publish:
+            release.sync(self.root, self.destination, 'owner/perch', 'owner/homebrew-tap')
+        publish.assert_called_once_with(self.root, self.destination, 'owner/perch', 'owner/homebrew-tap')
+
+    def test_sync_requires_a_clean_checkout(self):
+        (self.root / 'Info.plist').write_bytes(plistlib.dumps({'CFBundleShortVersionString': '2.0', 'CFBundleVersion': '13'}))
+        with patch.object(release, 'github') as github:
+            with self.assertRaisesRegex(RuntimeError, 'must be clean'):
+                release.sync(self.root, self.destination, 'owner/perch', 'owner/homebrew-tap')
+        github.assert_not_called()
 
 if __name__ == '__main__':
     unittest.main(verbosity=2)

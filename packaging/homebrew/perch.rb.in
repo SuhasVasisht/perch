@@ -4,6 +4,7 @@ class Perch < Formula
   url "@SOURCE_URL@"
   sha256 "@SHA256@"
   license "MIT"
+  head "https://github.com/@REPO@.git", branch: "main"
 
   depends_on arch: :arm64
   depends_on macos: :tahoe
@@ -40,6 +41,10 @@ class Perch < Formula
 
   test do
     system "/usr/bin/codesign", "--verify", "--strict", prefix/"Perch.app"
-    assert_equal "Perch #{version} (@BUILD@)\n", shell_output("#{bin}/perch --version")
+    if version.head?
+      assert_match(/\APerch \S+ \(\d+\)\n\z/, shell_output("#{bin}/perch --version"))
+    else
+      assert_equal "Perch #{version} (@BUILD@)\n", shell_output("#{bin}/perch --version")
+    end
   end
 end

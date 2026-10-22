@@ -50,12 +50,14 @@ Requires macOS 26 on Apple silicon.
 
 The source-building tap requires [Homebrew](https://brew.sh/) and Xcode 26 command line tools or later. Install the tools with `xcode-select --install` if needed.
 
-After the first [Homebrew release is published](#publish-a-homebrew-release), install and launch with:
+Install and launch with:
 
 ```sh
 brew install suhasvasisht/tap/perch
 perch
 ```
+
+To build the latest `main` instead of the latest release, use `brew install --HEAD suhasvasisht/tap/perch`.
 
 Homebrew compiles Perch on your Mac and applies a free ad-hoc signature. This method needs no DMG, paid Apple Developer account, or notarization. It installs the app inside Homebrew's Cellar and adds the `perch` command. If you have a DMG-installed copy running, quit it before opening the Homebrew copy. Both copies use your existing settings and sign-ins.
 
@@ -105,34 +107,23 @@ python3 scripts/verify-homebrew.py
 
 The check creates a temporary local tap, installs the packaged source through Homebrew, runs `brew test`, executes the installed app with `--version`, and verifies its ad-hoc signature. It removes its test install and tap afterward. It leaves `/Applications/Perch.app` in place and does not open any app windows. The report is saved to `verification/perch-homebrew-report.json`. If Perch is already installed through Homebrew, use `brew test perch` instead.
 
-### Publish a Homebrew release
+### Releasing
 
-Publishing requires Python 3, Git, and the [GitHub CLI](https://cli.github.com/). Sign in with `gh auth login`.
+The tap at [SuhasVasisht/homebrew-tap](https://github.com/SuhasVasisht/homebrew-tap) is kept in sync by the [Homebrew workflow](.github/workflows/homebrew.yml). It runs on every push to `main`:
 
-For the first release, create the public source repository if it does not exist:
+- **A new version** in `Info.plist` (raise both `CFBundleShortVersionString` and `CFBundleVersion`) is published as a `v<version>` GitHub release with its source archive and checksum. The tap formula then points at it, so `brew upgrade` picks it up.
+- **An already released version** only refreshes the tap formula from `packaging/homebrew/perch.rb.in`. Code pushed without a version bump reaches `brew install --HEAD` users right away, and everyone else with the next version.
 
-```sh
-gh repo create SuhasVasisht/perch --public --description "Small, cropped web apps that float on your Mac desktop"
-```
+The workflow pushes to the tap with a deploy key stored as the `TAP_DEPLOY_KEY` Actions secret. It refuses to replace published source or to reuse a version for a different build. Edit the formula through the template here, never in the tap directly, because the next push overwrites the tap's copy.
 
-Set the release version and build in `Info.plist`, commit the release changes, and push the release commit to the configured `origin`:
-
-```sh
-git push -u origin main
-./package.sh --publish-homebrew
-```
-
-The publish command requires a clean checkout and checks that the exact commit exists on GitHub. It packages source from that commit, creates a `v<version>` GitHub release with the source archive and checksum, and creates or updates `SuhasVasisht/homebrew-tap` with `Formula/perch.rb`. This is your own Homebrew tap, so no submission to `homebrew/core` is needed. Existing tap files are preserved.
-
-Re-running the command accepts identical release assets. It refuses to replace published source or reuse a version tag for a different commit. For the next release, increase both version fields in `Info.plist`, commit, push, verify, and publish again. Other repositories can be selected with `--repo owner/perch --tap-repo owner/homebrew-tap`.
-
-After publishing, check the public installation:
+The DMG is built on a Mac, so attach it to each release yourself:
 
 ```sh
-brew install suhasvasisht/tap/perch
-brew test suhasvasisht/tap/perch
-perch --version
+./package.sh
+gh release upload v<version> dist/Perch-<version>.dmg
 ```
+
+`./package.sh --publish-homebrew` does the same release and tap update from your Mac instead. Neither path ever replaces a published source archive: if a release already exists with different bytes, it stops with an error.
 
 ## Adding a widget
 
