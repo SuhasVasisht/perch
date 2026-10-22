@@ -28,7 +28,9 @@ def output(*args, **kwargs):
 def github(path, missing_ok=False):
     result = subprocess.run(['gh', 'api', path], capture_output=True, text=True)
     if result.returncode:
-        if missing_ok and '(HTTP 404)' in result.stderr:
+        # GitHub answers 404 for a missing repository or release, and 422 for a
+        # commit lookup by a tag that does not exist yet.
+        if missing_ok and ('(HTTP 404)' in result.stderr or '(HTTP 422)' in result.stderr):
             return None
         raise RuntimeError(result.stderr.strip())
     return json.loads(result.stdout)

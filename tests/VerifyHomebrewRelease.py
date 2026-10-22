@@ -40,6 +40,16 @@ class HomebrewRelease(unittest.TestCase):
         self.destination = Path(self.temp.name) / 'release'
         self.commit = subprocess.check_output(['git', '-C', str(self.root), 'rev-parse', 'HEAD'], text=True).strip()
 
+    def test_missing_tag_lookup_counts_as_missing(self):
+        for status in ('404', '422'):
+            failure = subprocess.CompletedProcess([], 1, '', f'gh: No commit found for SHA: v1.9 (HTTP {status})')
+            with patch.object(release.subprocess, 'run', return_value=failure):
+                self.assertIsNone(release.github('repos/owner/perch/commits/v1.9', missing_ok=True))
+        failure = subprocess.CompletedProcess([], 1, '', 'gh: Bad credentials (HTTP 401)')
+        with patch.object(release.subprocess, 'run', return_value=failure):
+            with self.assertRaises(RuntimeError):
+                release.github('repos/owner/perch/commits/v1.9', missing_ok=True)
+
     def test_archive_contains_only_build_inputs_with_a_matching_formula(self):
         (self.root / 'private-session.json').write_text('must stay local')
         (self.root / 'Perch.app').mkdir()
