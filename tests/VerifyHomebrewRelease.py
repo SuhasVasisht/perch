@@ -119,6 +119,9 @@ class HomebrewRelease(unittest.TestCase):
         subprocess.run(['git', 'clone', '-q', '--bare', str(seed), str(remote)], check=True)
         published = {}
         mutations = []
+        # Tap commits must use the source checkout's identity, not the global one.
+        subprocess.run(['git', '-C', str(self.root), 'config', 'user.name', 'Perch author'], check=True)
+        subprocess.run(['git', '-C', str(self.root), 'config', 'user.email', 'author@example.invalid'], check=True)
 
         def github(path, missing_ok=False):
             if path in ('repos/owner/perch', 'repos/owner/homebrew-tap'):
@@ -146,9 +149,8 @@ class HomebrewRelease(unittest.TestCase):
                 subprocess.run(['git', 'clone', '-q', str(remote), args[4]], check=True)
                 return
             self.assertEqual(args[0], 'git')
-            if args[1] == 'commit':
+            if 'commit' in args:
                 mutations.append('formula committed')
-                args = ('git', '-c', 'user.name=Perch test', '-c', 'user.email=test@localhost', *args[1:])
             subprocess.run(args, check=True, **kwargs)
 
         with patch.object(release.shutil, 'which', return_value='/usr/bin/gh'), \
@@ -158,6 +160,8 @@ class HomebrewRelease(unittest.TestCase):
             release.publish(self.root, self.destination, 'owner/perch', 'owner/homebrew-tap')
         self.assertEqual(subprocess.check_output(['git', '--git-dir', str(remote), 'rev-parse', 'HEAD'], text=True), head)
         self.assertEqual(mutations, ['release created', 'formula committed'])
+        author = subprocess.check_output(['git', '--git-dir', str(remote), 'log', '-1', '--format=%an <%ae> %cn <%ce>'], text=True).strip()
+        self.assertEqual(author, 'Perch author <author@example.invalid> Perch author <author@example.invalid>')
         self.assertEqual(subprocess.check_output(['git', '--git-dir', str(remote), 'show', 'HEAD:Formula/other.rb'], text=True),
                          'another maintained formula\n')
         formula = subprocess.check_output(['git', '--git-dir', str(remote), 'show', 'HEAD:Formula/perch.rb'], text=True)

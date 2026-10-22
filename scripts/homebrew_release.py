@@ -147,7 +147,11 @@ def publish(root, destination, repo, tap_repo):
         run('git', 'add', 'Formula/perch.rb', cwd=checkout)
         diff = subprocess.run(['git', 'diff', '--cached', '--quiet'], cwd=checkout)
         if diff.returncode == 1:
-            run('git', 'commit', '-m', f'perch {version}', cwd=checkout)
+            # Commit as this checkout's author, not the machine-wide git identity.
+            name = output('git', 'config', 'user.name', cwd=root)
+            email = output('git', 'config', 'user.email', cwd=root)
+            run('git', '-c', f'user.name={name}', '-c', f'user.email={email}',
+                'commit', '-m', f'perch {version}', cwd=checkout)
             run('git', 'push', 'origin', 'HEAD', cwd=checkout)
         else:
             diff.check_returncode()
