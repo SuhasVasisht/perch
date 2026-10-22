@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Local X interaction fixture</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; color: #e7e9ea; background: black; font: 16px -apple-system, sans-serif; }
+  [data-testid=primaryColumn] { width: 600px; }
+  .header { position: sticky; top: 0; height: 56px; padding: 12px; background: black; z-index: 1; }
+  article { padding: 18px; border-bottom: 1px solid #333; background: black; }
+  .card { height: 300px; } .tall { height: 1100px; }
+  a { color: #55acee; } button { padding: 8px; }
+  #comments { height: 3400px; padding: 20px; }
+  .comment { height: 220px; border-bottom: 1px solid #333; }
+  .dialog { position: fixed; inset: 100px 20px; background: #202020; z-index: 10; }
+  .dialog-scroll { height: 250px; overflow: auto; }
+</style>
+<div id="root"></div>
+<script>
+  // Simulates a site's SPA router. WebKit keeps its own history state intact.
+  // Missing entries defer to WebKit's native restoration, including restart.
+  sessionStorage.setItem('loadCount', String(Number(sessionStorage.getItem('loadCount') || 0) + 1));
+  const positions = new Map();
+  let nextKey = 1;
+  let changedPostHeight = false;
+  if (sessionStorage.getItem('latestOnNextLoad')) {
+    sessionStorage.removeItem('latestOnNextLoad');
+    sessionStorage.setItem('latestFeed', '1');
+  }
+  if (!history.state?.key) history.replaceState({key: 'start'}, '', location.href);
+  function card(id, tall = false) {
+    return `<div data-testid="cellInnerDiv"><article data-testid="tweet" class="${tall ? 'tall' : 'card'}" ${id===10003 && changedPostHeight ? 'style="height:320px"' : ''}>
+      <a href="/reader/status/${id}"><time>Post ${id}</time></a>
+      <div data-testid="tweetText">Show 35 new posts. A local test post. ${tall ? 'This post is taller than the widget.' : 'No account or external requests.'}</div>
+      <button class="more" onclick="openMenu()">More</button>
+    </article></div>`;
+  }
+  function reuseFeedCells() {
+    const articles = [...document.querySelectorAll('article[data-testid=tweet]')];
+    const first = articles[1], second = articles[2];
+    const html = first.innerHTML, className = first.className;
+    first.innerHTML = second.innerHTML; first.className = second.className;
+    second.innerHTML = html; second.className = className;
+  }
+  function makeAdPost(kind) {
+    const article = document.querySelector('article[data-testid=tweet]');
+    article.innerHTML = kind === 'external'
+      ? '<div data-testid="card.wrapper"><a href="https://example.invalid/promo/status/99999"><time>External promotion</time></a></div>'
+      : `<a href="/reader/status/10001/analytics">Analytics</a>${kind === 'canonical' ? '<a href="/reader/status/10001">View post</a>' : ''}<div data-testid="card.wrapper"><a href="https://example.invalid/">External promotion</a></div><button onclick="sessionStorage.setItem('wrongAdAction','1')">Like</button>`;
+    article.onclick = event => {
+      if (event.target !== article) return;
+      if (kind === 'external') sessionStorage.setItem('wrongAdAction', '1');
+      else {
+        sessionStorage.setItem('adBodyOpened', String(Number(sessionStorage.getItem('adBodyOpened') || 0) + 1));
+        navigate('/reader/status/10001');
+      }
+    };
+  }
+  function render() {
+    const home = location.pathname === '/home';
+    root.innerHTML = `<header role="banner">Sidebar</header><main role="main"><div><div><div data-testid="primaryColumn">
+      ${home ? `<div aria-label="Home timeline"><div class="header">For you / Following</div>
+        <button id="aria-pill" aria-label="Show 35 new posts">New items</button>
+        <button id="new-posts" data-testid="newPostsPill">Show 35 new posts</button>
+        <div style="position:fixed;top:60px"><div role="button" id="translated-pill" aria-label="Afficher 35 nouveaux posts">Afficher 35 nouveaux posts</div></div>
+        <div><div data-testid="tweetTextarea_0">Composer</div></div><div aria-label="Timeline: Your Home Timeline">
+        ${[sessionStorage.getItem('latestFeed') ? 90001 : 10001,10002,10003,10004,10005,10006].map(id=>card(id,id===10002)).join('')}</div></div>` :
+        `<div class="header"><button id="back" onclick="history.back()">Back</button> Post</div>
+        <article data-testid="tweet"><a href="${location.pathname}"><time>Current post</time></a>
+        <div data-testid="tweetText">Comments for ${location.pathname}</div>
+        <a id="nested" href="/reader/status/20001">Open a reply</a>
+        <div contenteditable="true" role="textbox" id="reply"> </div>
+        <input type="range" id="volume" aria-label="Volume">
+        <button class="more" onclick="openMenu()">More</button></article>
+        <div id="comments">${Array.from({length: 14},(_,i)=>`<div data-testid="cellInnerDiv"><article data-testid="tweet" class="comment"><a href="/reader/status/${30001+i}"><time>Reply ${i+1}</time></a><div data-testid="tweetText">Comment ${i+1}</div></article></div>`).join('')}</div>`}
+      </div></div></div></main>`;
+  }
+  function navigate(path) {
+    if (path === '/reader/status/10003') changedPostHeight = true;
+    positions.set(history.state.key, scrollY);
+    history.pushState({key: `entry-${nextKey++}`}, '', path);
+    render();
+    scrollTo(0,0);
+  }
+  addEventListener('popstate', () => {
+    render();
+    // Reproduces X's hidden-header restoration offset from the live walkthrough.
+    const saved = positions.get(history.state.key);
+    setTimeout(()=>scrollTo(0, (saved ?? scrollY) + 54),70);
+  });
+  document.addEventListener('click', event => {
+    const link = event.target.closest('a[href]');
+    if (link) { event.preventDefault(); navigate(link.getAttribute('href')); }
+  });
+  function openMenu() {
+    const dialog = document.createElement('div');
+    dialog.role = 'dialog'; dialog.className = 'dialog';
+    dialog.innerHTML = '<button id="dismiss" onclick="this.closest(\'[role=dialog]\').remove()">Close menu</button><div class="dialog-scroll"><div style="height:900px">Local menu content</div></div>';
+    document.body.append(dialog);
+  }
+  // Models X's asynchronous initial rendering after document load.
+  const renderDelay = Number(sessionStorage.getItem('renderDelay') || 250);
+  sessionStorage.removeItem('renderDelay');
+  const startupScrollShift = Number(new URLSearchParams(location.search).get('startupScrollShift') || sessionStorage.getItem('startupScrollShift') || 0);
+  sessionStorage.removeItem('startupScrollShift');
+  if (new URLSearchParams(location.search).has('initiallyHydrated')) {
+    render();
+    scrollTo(0,54);
+  } else setTimeout(() => {
+    render();
+    // Hydration can attach post markers to existing nodes without adding DOM.
+    const articles = [...document.querySelectorAll('article[data-testid=tweet]')];
+    articles.forEach(article => article.removeAttribute('data-testid'));
+    setTimeout(() => articles.forEach(article => article.setAttribute('data-testid', 'tweet')), 100);
+    if (startupScrollShift) setTimeout(() => scrollBy(0, startupScrollShift), 220);
+  }, renderDelay);
+</script>
+</html>

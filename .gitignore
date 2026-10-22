@@ -1,0 +1,13 @@
+# Build output
+*.app
+.build.noindex/
+dist/
+
+# Local verification evidence: contains screenshots and live page captures
+verification/
+
+# Private working notes
+handoff.md
+
+.DS_Store
+Assets/shell-icon.png

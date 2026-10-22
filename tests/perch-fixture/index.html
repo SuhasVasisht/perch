@@ -1,0 +1,18 @@
+<!doctype html><meta charset="utf-8"><title>Perch local fixture</title>
+<style>body { margin:0; background:#eef0f3; font:18px system-ui; } button { width:100%;height:150px; } </style>
+<button id="action" onclick="window.clicks++">Local action</button>
+<p id="copy" style="height:50px;margin:0">Widget text must not turn into a selection while dragging.</p>
+<input id="editor" aria-label="Search" value="Editable search text">
+<a id="link" href="#fixture" draggable="true">Native link</a>
+<audio id="audio" autoplay loop muted src="/tone.wav"></audio>
+<video id="video" autoplay loop muted></video>
+<script>
+window.clicks=0;
+window.mediaPlaying=false;
+audio.addEventListener('playing',()=>window.mediaPlaying=true);
+// A live video stream exercises video teardown without network media or codecs.
+const canvas=document.createElement('canvas'); canvas.width=32;canvas.height=32;
+canvas.getContext('2d').fillRect(0,0,32,32);
+video.srcObject=canvas.captureStream(1);
+video.play().catch(()=>{});
+</script>
